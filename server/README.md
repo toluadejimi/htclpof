@@ -1,18 +1,15 @@
 # Highlight Consulting — Proof of Funds API
 
-A real backend for the Proof of Funds portal: PostgreSQL database, cookie-based JWT authentication (bcrypt-hashed passwords), applications, document uploads, and public document verification. No demo/sample data — every record comes from real signups and submissions.
+A real backend for the Proof of Funds portal: MySQL database, cookie-based JWT authentication (bcrypt-hashed passwords), applications, document uploads, and public document verification. No demo/sample data — every record comes from real signups and submissions.
 
-## Setup
+## Local setup
 
-1. Create a PostgreSQL database (locally, Docker, or a managed provider).
-   ```bash
-   createdb highlight_pof
-   ```
+1. Create a MySQL database (locally, or via cPanel's "MySQL Databases").
 2. Copy the environment template and fill in real values:
    ```bash
    cp .env.example .env
    ```
-   - `DATABASE_URL`: connection string for your Postgres database.
+   - `DATABASE_URL`: `mysql://user:password@host:3306/dbname`
    - `JWT_SECRET`: a long random string (e.g. `openssl rand -hex 32`).
    - `COOKIE_SECURE`: set to `true` once served over HTTPS in production.
 3. Install dependencies and run migrations:
@@ -26,7 +23,27 @@ A real backend for the Proof of Funds portal: PostgreSQL database, cookie-based 
    ```
    The API listens on `http://localhost:4000` by default.
 
+## Deploying on cPanel (Setup Node.js App)
+
+Since `highlightconsult.com` hosting supports Node.js apps via cPanel:
+
+1. In cPanel → **Software** → **Setup Node.js App** → **Create Application**.
+   - Application root: the folder you upload this `server/` code into (e.g. `pof-api`).
+   - Application startup file: `src/index.js`.
+   - Node version: 18 or later.
+2. In cPanel → **Databases** → **MySQL Databases**, create a database + user, and grant the user full privileges on it. Note the resulting database name/user/password (cPanel usually prefixes them with your account username).
+3. In the Node.js App's **Environment Variables** section (or a `.env` file in the app root), set:
+   - `DATABASE_URL=mysql://<db_user>:<db_password>@localhost:3306/<db_name>`
+   - `JWT_SECRET` — a long random value
+   - `JWT_EXPIRES_IN=7d`
+   - `COOKIE_SECURE=true`
+   - `CLIENT_ORIGIN=https://highlightconsult.com` (the origin serving the portal, e.g. if the portal lives at `https://highlightconsult.com/pof/`)
+   - `UPLOAD_DIR=/home/<cpanel_user>/pof-uploads` (a writable path outside the web root)
+4. Use the cPanel Node.js App's "Run NPM Install" button, then open its terminal and run `npm run migrate` once to create the tables.
+5. Start/restart the application from the cPanel Node.js App page. cPanel proxies a public URL (or your own subdomain/path) to it — use that URL as `VITE_API_URL` when building the portal.
+
 ## Endpoints
+
 
 - `POST /api/auth/register` — create an account
 - `POST /api/auth/login` / `POST /api/auth/logout`

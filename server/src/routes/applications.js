@@ -1,5 +1,6 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
@@ -30,10 +31,18 @@ function serialize(row) {
 }
 
 async function nextReference() {
-  const year = new Date().getFullYear();
-  const seq = await query("SELECT nextval('application_ref_seq') AS n");
-  const n = String(seq.rows[0].n).padStart(6, '0');
-  return `HCS-${year}-${n}`;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("UPDATE counters SET value = LAST_INSERT_ID(value + 1) WHERE name = 'application_ref'");
+    const [rows] = await conn.query('SELECT LAST_INSERT_ID() AS n');
+    await conn.commit();
+    const year = new Date().getFullYear();
+    const n = String(rows[0].n).padStart(6, '0');
+    return `HCS-${year}-${n}`;
+  } finally {
+    conn.release();
+  }
 }
 
 // Create a new application (authenticated customer)
@@ -50,21 +59,23 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Amount must be a positive number.' });
   }
   const reference = await nextReference();
-  const result = await query(
+  const id = crypto.randomUUID();
+  await query(
     `INSERT INTO applications
-      (reference, user_id, full_name, date_of_birth, nationality, id_type, id_number, phone, email, amount, currency, purpose, destination, intended_use, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'submitted')
-     RETURNING *`,
-    [reference, req.user.id, fullName, dateOfBirth || null, nationality || null, idType || null, idNumber || null, phone || null, email || null,
+      (id, reference, user_id, full_name, date_of_birth, nationality, id_type, id_number, phone, email, amount, currency, purpose, destination, intended_use, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'submitted')`,
+    [id, reference, req.user.id, fullName, dateOfBirth || null, nationality || null, idType || null, idNumber || null, phone || null, email || null,
       numericAmount, currency || 'USD', purpose, destination || null, intendedUse || null]
   );
-  const application = result.rows[0];
+  const created = await query('SELECT * FROM applications WHERE id = $1', [id]);
+  const application = created.rows[0];
   await query(
-    `INSERT INTO application_events (application_id, status, note) VALUES ($1, 'submitted', 'Application submitted')`,
-    [application.id]
+    `INSERT INTO application_events (id, application_id, status, note) VALUES ($1, $2, 'submitted', 'Application submitted')`,
+    [crypto.randomUUID(), application.id]
   );
   res.status(201).json({ application: serialize(application) });
 });
+
 
 // List the authenticated customer's applications
 router.get('/mine', requireAuth, async (req, res) => {
@@ -95,7 +106,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
   }
   if (search) {
     params.push(`%${search}%`);
-    clauses.push(`reference ILIKE $${params.length}`);
+    clauses.push(`reference LIKE $${params.length}`);
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await query(`SELECT * FROM applications ${where} ORDER BY created_at DESC`, params);
@@ -108,26 +119,29 @@ router.patch('/:id/status', requireAuth, requireAdmin, async (req, res) => {
   if (!ALLOWED_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid status value.' });
   }
-  const result = await query('UPDATE applications SET status = $1, updated_at = now() WHERE id = $2 RETURNING *', [status, req.params.id]);
-  const application = result.rows[0];
+  await query('UPDATE applications SET status = $1, updated_at = NOW() WHERE id = $2', [status, req.params.id]);
+  const updated = await query('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+  const application = updated.rows[0];
   if (!application) return res.status(404).json({ error: 'Application not found' });
-  await query('INSERT INTO application_events (application_id, status, note) VALUES ($1, $2, $3)', [application.id, status, note || null]);
+  await query('INSERT INTO application_events (id, application_id, status, note) VALUES ($1, $2, $3, $4)', [crypto.randomUUID(), application.id, status, note || null]);
   res.json({ application: serialize(application) });
 });
 
 // Admin: aggregate stats for dashboard
 router.get('/stats/summary', requireAuth, requireAdmin, async (req, res) => {
   const totals = await query(`
-    SELECT status, count(*)::int AS count FROM applications GROUP BY status
+    SELECT status, count(*) AS count FROM applications GROUP BY status
   `);
   const monthly = await query(`
-    SELECT to_char(date_trunc('month', created_at), 'Mon') AS month, count(*)::int AS count
+    SELECT DATE_FORMAT(created_at, '%b') AS month, count(*) AS count
     FROM applications
-    WHERE created_at > now() - interval '12 months'
-    GROUP BY date_trunc('month', created_at)
-    ORDER BY date_trunc('month', created_at)
+    WHERE created_at > DATE_SUB(NOW(), INTERVAL 12 MONTH)
+    GROUP BY DATE_FORMAT(created_at, '%Y-%m'), DATE_FORMAT(created_at, '%b')
+    ORDER BY DATE_FORMAT(created_at, '%Y-%m')
   `);
-  res.json({ byStatus: totals.rows, monthly: monthly.rows });
+  const byStatus = totals.rows.map((r) => ({ status: r.status, count: Number(r.count) }));
+  const monthlyRows = monthly.rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+  res.json({ byStatus, monthly: monthlyRows });
 });
 
 export default router;

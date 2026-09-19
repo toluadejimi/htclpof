@@ -2,11 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
-import pg from 'pg';
+import mysql from 'mysql2/promise';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = mysql.createPool(process.env.DATABASE_URL);
+
+function splitStatements(sql) {
+  return sql
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 async function migrate() {
   const dir = path.join(__dirname, '..', 'migrations');
@@ -14,7 +21,9 @@ async function migrate() {
   for (const file of files) {
     const sql = fs.readFileSync(path.join(dir, file), 'utf8');
     console.log(`Applying migration ${file}...`);
-    await pool.query(sql);
+    for (const statement of splitStatements(sql)) {
+      await pool.query(statement);
+    }
   }
   console.log('Migrations complete.');
   await pool.end();

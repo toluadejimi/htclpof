@@ -50,12 +50,16 @@ router.post('/:applicationId', requireAuth, upload.single('file'), async (req, r
   if (!req.file || !docType) {
     return res.status(400).json({ error: 'A document type and file are required.' });
   }
-  const result = await query(
-    `INSERT INTO documents (application_id, doc_type, original_name, stored_path, mime_type, size_bytes)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, doc_type, original_name, mime_type, size_bytes, uploaded_at`,
-    [req.params.applicationId, docType, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size]
+  await query(
+    `INSERT INTO documents (id, application_id, doc_type, original_name, stored_path, mime_type, size_bytes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [crypto.randomUUID(), req.params.applicationId, docType, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size]
   );
-  res.status(201).json({ document: result.rows[0] });
+  const created = await query(
+    'SELECT id, doc_type, original_name, mime_type, size_bytes, uploaded_at FROM documents WHERE application_id = $1 ORDER BY uploaded_at DESC LIMIT 1',
+    [req.params.applicationId]
+  );
+  res.status(201).json({ document: created.rows[0] });
 });
 
 router.get('/application/:applicationId', requireAuth, async (req, res) => {

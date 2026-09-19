@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -36,13 +37,13 @@ router.post('/register', async (req, res) => {
     return res.status(409).json({ error: 'An account with this email already exists.' });
   }
   const passwordHash = await bcrypt.hash(password, 12);
-  const result = await query(
-    `INSERT INTO users (full_name, email, phone, password_hash, role)
-     VALUES ($1, $2, $3, $4, 'customer')
-     RETURNING id, full_name, email, phone, role`,
-    [fullName.trim(), normalizedEmail, phone || null, passwordHash]
+  const id = crypto.randomUUID();
+  await query(
+    `INSERT INTO users (id, full_name, email, phone, password_hash, role)
+     VALUES ($1, $2, $3, $4, $5, 'customer')`,
+    [id, fullName.trim(), normalizedEmail, phone || null, passwordHash]
   );
-  const user = result.rows[0];
+  const user = { id, full_name: fullName.trim(), email: normalizedEmail, phone: phone || null, role: 'customer' };
   const token = signToken(user);
   res.cookie('token', token, cookieOptions());
   res.status(201).json({ user: publicUser(user) });
