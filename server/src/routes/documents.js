@@ -72,6 +72,19 @@ router.get('/application/:applicationId', requireAuth, async (req, res) => {
   res.json({ documents: result.rows });
 });
 
+// All documents across the signed-in customer's own applications.
+router.get('/mine', requireAuth, async (req, res) => {
+  const result = await query(
+    `SELECT d.id, d.doc_type, d.original_name, d.mime_type, d.size_bytes, d.uploaded_at, a.reference AS application_reference
+     FROM documents d
+     JOIN applications a ON a.id = d.application_id
+     WHERE a.user_id = $1
+     ORDER BY d.uploaded_at DESC`,
+    [req.user.id]
+  );
+  res.json({ documents: result.rows });
+});
+
 router.get('/:id/file', requireAuth, async (req, res) => {
   const result = await query('SELECT * FROM documents WHERE id = $1', [req.params.id]);
   const doc = result.rows[0];

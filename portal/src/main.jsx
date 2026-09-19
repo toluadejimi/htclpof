@@ -7,7 +7,7 @@ import {
   FileCheck2, ChevronDown, AlertCircle
 } from 'lucide-react';
 import './styles.css';
-import { api } from './api.js';
+import { api, API_BASE } from './api.js';
 import { AuthProvider, useAuth, initials } from './auth-context.jsx';
 
 const STEP_TITLES = ['Personal info', 'Application Details', 'Documents', 'Review & Pay'];
@@ -830,6 +830,90 @@ function SimplePanel({ title, text }) {
   );
 }
 
+function MfaSection() {
+  const { user, setUser } = useAuth();
+  const [setupData, setSetupData] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function refreshUser() {
+    const { user: fresh } = await api.me();
+    setUser(fresh);
+  }
+
+  async function startMfaSetup() {
+    setError('');
+    setBusy(true);
+    try {
+      setSetupData(await api.mfaSetup());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmEnable(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api.mfaEnable(mfaCode);
+      setSetupData(null);
+      setMfaCode('');
+      await refreshUser();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disableMfa(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api.mfaDisable(mfaCode);
+      setMfaCode('');
+      await refreshUser();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <div className="card-head"><div><h2>Two-Factor Authentication</h2><p>Google Authenticator (or any TOTP app) — adds a second step at login.</p></div></div>
+      <ErrorBanner message={error} />
+      {user?.mfaEnabled ? (
+        <form onSubmit={disableMfa} className="form-grid">
+          <Field label="Enter a current code to disable 2FA" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
+          <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+            <button className="btn ghost" type="submit" disabled={busy}>{busy ? 'Disabling…' : 'Disable 2FA'}</button>
+          </div>
+        </form>
+      ) : setupData ? (
+        <form onSubmit={confirmEnable} className="form-grid">
+          <div style={{ gridColumn: '1 / -1' }}>
+            <img src={setupData.qrCode} alt="2FA QR code" style={{ width: 200, height: 200 }} />
+            <p className="sub">Scan with Google Authenticator, or enter this key manually: <b>{setupData.secret}</b></p>
+          </div>
+          <Field label="Enter the 6-digit code to confirm" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
+          <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+            <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Confirming…' : 'Enable 2FA'}</button>
+          </div>
+        </form>
+      ) : (
+        <button className="btn primary" onClick={startMfaSetup} disabled={busy}>{busy ? 'Starting…' : 'Set up 2FA'}</button>
+      )}
+    </div>
+  );
+}
+
 function ProfilePanel() {
   const { user } = useAuth();
   const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
@@ -875,6 +959,129 @@ function ProfilePanel() {
             <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button>
           </div>
         </form>
+      </div>
+      <MfaSection />
+    </div>
+  );
+}
+
+function PaymentsPanel({ setPage }) {
+  const [applications, setApplications] = useState([]);
+  const [payment, setPayment] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([api.myApplications(), api.getPaymentSettings()])
+      .then(([apps, pay]) => { setApplications(apps.applications); setPayment(pay); })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Payments</h1><p>Application fees and how to pay them.</p></div></div>
+      <ErrorBanner message={error} />
+      <div className="card">
+        <div className="card-head"><div><h2>Application Fee</h2></div></div>
+        {loading ? (
+          <EmptyState text="Loading…" />
+        ) : payment ? (
+          <div className="detail-grid">
+            <div><span>Fee</span><b>{payment.feeCurrency} {Number(payment.feeAmount).toLocaleString()}</b></div>
+            <div><span>Bank</span><b>{payment.bankName || '—'}</b></div>
+            <div><span>Account Name</span><b>{payment.accountName || '—'}</b></div>
+            <div><span>Account Number</span><b>{payment.accountNumber || '—'}</b></div>
+          </div>
+        ) : (
+          <EmptyState text="Payment details have not been configured yet." />
+        )}
+        {payment?.instructions && <p className="sub">{payment.instructions}</p>}
+        <p className="sub">Always include your application reference number in the transfer description.</p>
+      </div>
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-head"><div><h2>Your Applications</h2></div></div>
+        {loading ? (
+          <EmptyState text="Loading…" />
+        ) : applications.length === 0 ? (
+          <EmptyState text="No applications yet — apply to see fee references here." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Reference</th><th>Status</th><th>Submitted</th><th /></tr></thead>
+              <tbody>
+                {applications.map((a) => (
+                  <tr key={a.id}>
+                    <td><b>{a.reference}</b></td>
+                    <td><Status>{a.status}</Status></td>
+                    <td>{new Date(a.createdAt).toLocaleDateString()}</td>
+                    <td><button className="btn ghost sm" onClick={() => setPage('track:' + a.id)}>View</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DocumentsPanel() {
+  const [documents, setDocuments] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.myDocuments()
+      .then((data) => setDocuments(data.documents))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Documents</h1><p>Files attached to your applications.</p></div></div>
+      <ErrorBanner message={error} />
+      <div className="card">
+        {loading ? (
+          <EmptyState text="Loading documents…" />
+        ) : documents.length === 0 ? (
+          <EmptyState text="No documents uploaded yet." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>File</th><th>Type</th><th>Application</th><th>Uploaded</th><th /></tr></thead>
+              <tbody>
+                {documents.map((d) => (
+                  <tr key={d.id}>
+                    <td><b>{d.original_name}</b></td>
+                    <td>{d.doc_type}</td>
+                    <td>{d.application_reference}</td>
+                    <td>{new Date(d.uploaded_at).toLocaleDateString()}</td>
+                    <td><a className="btn ghost sm" href={`${API_BASE}/api/documents/${d.id}/file`} target="_blank" rel="noreferrer">Download</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SupportPanel() {
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Support</h1><p>Get help with an application.</p></div></div>
+      <div className="card">
+        <div className="detail-grid">
+          <div><span>Phone</span><b><a href="tel:+2348039434923">+234 803 943 4923</a></b></div>
+          <div><span>Phone</span><b><a href="tel:+2348137662027">+234 813 766 2027</a></b></div>
+          <div><span>Email</span><b><a href="mailto:Naahmad@highlightconsult.com">Naahmad@highlightconsult.com</a></b></div>
+        </div>
+        <p className="sub">Include your application reference number when contacting support about a specific application.</p>
       </div>
     </div>
   );
@@ -1338,8 +1545,6 @@ function AdminSettings() {
   const { user } = useAuth();
   const [tab, setTab] = useState('Security');
   const [error, setError] = useState('');
-  const [setupData, setSetupData] = useState(null);
-  const [mfaCode, setMfaCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [payment, setPayment] = useState(null);
   const [paymentForm, setPaymentForm] = useState(null);
@@ -1351,50 +1556,6 @@ function AdminSettings() {
 
   if (user?.role !== 'admin') {
     return <div className="page"><div className="page-head"><div><h1>Settings</h1></div></div><div className="card"><EmptyState text="Only admins can manage portal settings." /></div></div>;
-  }
-
-  async function startMfaSetup() {
-    setError('');
-    setBusy(true);
-    try {
-      const data = await api.mfaSetup();
-      setSetupData(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmEnable(e) {
-    e.preventDefault();
-    setError('');
-    setBusy(true);
-    try {
-      await api.mfaEnable(mfaCode);
-      setSetupData(null);
-      setMfaCode('');
-      window.location.reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function disableMfa(e) {
-    e.preventDefault();
-    setError('');
-    setBusy(true);
-    try {
-      await api.mfaDisable(mfaCode);
-      setMfaCode('');
-      window.location.reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function savePayment(e) {
@@ -1424,33 +1585,6 @@ function AdminSettings() {
           ))}
         </div>
 
-        {tab === 'Security' && (
-          <div>
-            <p className="sub">Two-factor authentication (Google Authenticator compatible) for your own admin account.</p>
-            {user.mfaEnabled ? (
-              <form onSubmit={disableMfa} className="form-grid">
-                <Field label="Enter a current code to disable 2FA" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
-                <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
-                  <button className="btn ghost" type="submit" disabled={busy}>{busy ? 'Disabling…' : 'Disable 2FA'}</button>
-                </div>
-              </form>
-            ) : setupData ? (
-              <form onSubmit={confirmEnable} className="form-grid">
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <img src={setupData.qrCode} alt="2FA QR code" style={{ width: 200, height: 200 }} />
-                  <p className="sub">Scan with Google Authenticator (or any TOTP app), or enter this key manually: <b>{setupData.secret}</b></p>
-                </div>
-                <Field label="Enter the 6-digit code to confirm" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
-                <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
-                  <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Confirming…' : 'Enable 2FA'}</button>
-                </div>
-              </form>
-            ) : (
-              <button className="btn primary" onClick={startMfaSetup} disabled={busy}>{busy ? 'Starting…' : 'Set up 2FA'}</button>
-            )}
-          </div>
-        )}
-
         {tab === 'Payment' && paymentForm && (
           <form className="form-grid" onSubmit={savePayment}>
             <Field label="Application Fee Amount" value={paymentForm.feeAmount} onChange={(e) => setPaymentForm({ ...paymentForm, feeAmount: e.target.value })} required />
@@ -1466,6 +1600,7 @@ function AdminSettings() {
           </form>
         )}
       </div>
+      {tab === 'Security' && <MfaSection />}
     </div>
   );
 }
@@ -1502,10 +1637,10 @@ function AppInner() {
       <CustomerLayout active={base} setPage={setPage}>
         {base === 'dashboard' && <Dashboard setPage={setPage} />}
         {base === 'applications' && <Applications setPage={setPage} />}
-        {base === 'payments' && <SimplePanel title="Payments" text="Application fees and receipts." />}
-        {base === 'documents' && <SimplePanel title="Documents" text="Files attached to your applications." />}
+        {base === 'payments' && <PaymentsPanel setPage={setPage} />}
+        {base === 'documents' && <DocumentsPanel />}
         {base === 'profile' && <ProfilePanel />}
-        {base === 'support' && <SimplePanel title="Support" text="Get help with an application." />}
+        {base === 'support' && <SupportPanel />}
       </CustomerLayout>
     );
   }

@@ -51,7 +51,7 @@ Since `highlightconsult.com` hosting supports Node.js apps via cPanel:
 - `POST /api/auth/mfa/verify-login` — complete login with `{mfaToken, code}`
 - `GET /api/auth/me` — current session user
 - `POST /api/auth/change-password` — change your own password
-- `POST /api/auth/mfa/setup` / `POST /api/auth/mfa/enable` / `POST /api/auth/mfa/disable` — admin-only TOTP 2FA (Google Authenticator compatible)
+- `POST /api/auth/mfa/setup` / `POST /api/auth/mfa/enable` / `POST /api/auth/mfa/disable` — TOTP 2FA (Google Authenticator compatible) for the signed-in user's own account
 - `POST /api/applications` — submit an application (auth required)
 - `GET /api/applications/mine` — the signed-in customer's applications
 - `GET /api/applications/:id` — application detail + timeline (owner, staff, or admin)
@@ -60,6 +60,7 @@ Since `highlightconsult.com` hosting supports Node.js apps via cPanel:
 - `GET /api/applications/stats/summary` — staff/admin dashboard aggregates
 - `POST /api/documents/:applicationId` — upload a document (`multipart/form-data`, field `file`, plus `docType`)
 - `GET /api/documents/application/:applicationId` — list documents for an application
+- `GET /api/documents/mine` — all documents across the signed-in customer's own applications
 - `GET /api/documents/:id/file` — download a document (owner, staff, or admin only)
 - `GET /api/verify/:reference` — public verification for approved/completed applications only
 - `GET /api/admin/team` / `POST /api/admin/team` / `PATCH /api/admin/team/:id` — admin-only: list, create, and activate/deactivate/reassign staff or admin accounts (new accounts get a one-time generated temporary password)
