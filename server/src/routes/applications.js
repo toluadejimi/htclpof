@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query, pool } from '../db.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireStaffOrAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -96,7 +96,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // Admin: list all applications with optional status/search filters
-router.get('/', requireAuth, requireAdmin, async (req, res) => {
+router.get('/', requireAuth, requireStaffOrAdmin, async (req, res) => {
   const { status, search } = req.query;
   const clauses = [];
   const params = [];
@@ -114,7 +114,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Admin: update application status
-router.patch('/:id/status', requireAuth, requireAdmin, async (req, res) => {
+router.patch('/:id/status', requireAuth, requireStaffOrAdmin, async (req, res) => {
   const { status, note } = req.body || {};
   if (!ALLOWED_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Invalid status value.' });
@@ -128,7 +128,7 @@ router.patch('/:id/status', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Admin: aggregate stats for dashboard
-router.get('/stats/summary', requireAuth, requireAdmin, async (req, res) => {
+router.get('/stats/summary', requireAuth, requireStaffOrAdmin, async (req, res) => {
   const totals = await query(`
     SELECT status, count(*) AS count FROM applications GROUP BY status
   `);

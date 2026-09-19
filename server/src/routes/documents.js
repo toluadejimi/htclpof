@@ -37,7 +37,7 @@ async function assertOwnerOrAdmin(req, applicationId) {
   const result = await query('SELECT user_id FROM applications WHERE id = $1', [applicationId]);
   const application = result.rows[0];
   if (!application) return { ok: false, code: 404, error: 'Application not found' };
-  if (application.user_id !== req.user.id && req.user.role !== 'admin') {
+  if (application.user_id !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'staff') {
     return { ok: false, code: 403, error: 'Not authorized' };
   }
   return { ok: true };

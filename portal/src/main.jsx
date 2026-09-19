@@ -349,6 +349,8 @@ function Login({ setPage }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mfaToken, setMfaToken] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
 
   function update(field) {
     return (e) => setForm({ ...form, [field]: e.target.value });
@@ -359,14 +361,58 @@ function Login({ setPage }) {
     setError('');
     setBusy(true);
     try {
-      const { user } = await api.login(form);
-      setUser(user);
-      setPage(user.role === 'admin' ? 'admin' : 'dashboard');
+      const data = await api.login(form);
+      if (data.mfaRequired) {
+        setMfaToken(data.mfaToken);
+        return;
+      }
+      setUser(data.user);
+      setPage(data.user.role === 'admin' || data.user.role === 'staff' ? 'admin' : 'dashboard');
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submitMfa(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const { user } = await api.verifyLoginMfa({ mfaToken, code: mfaCode });
+      setUser(user);
+      setPage(user.role === 'admin' || user.role === 'staff' ? 'admin' : 'dashboard');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (mfaToken) {
+    return (
+      <div className="auth-wrap">
+        <form className="auth-form" onSubmit={submitMfa}>
+          <h1>Two-factor verification</h1>
+          <p>Enter the 6-digit code from your authenticator app.</p>
+          <ErrorBanner message={error} />
+          <div className="form-grid">
+            <Field label="Verification code" placeholder="123456" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} required />
+          </div>
+          <div style={{ height: 22 }} />
+          <button className="btn primary block" type="submit" disabled={busy}>{busy ? 'Verifying…' : 'Verify'}</button>
+          <p className="muted-link"><button type="button" className="btn link" onClick={() => setMfaToken('')}>Back to login</button></p>
+        </form>
+        <aside className="auth-panel">
+          <img src="images/signup-building.png" alt="Glass tower at night" />
+          <div>
+            <h2>Track every<br />application<br />in one place</h2>
+            <p>Review status, documents, and payment history from your dashboard.</p>
+          </div>
+        </aside>
+      </div>
+    );
   }
 
   return (
@@ -434,6 +480,7 @@ function Apply({ setPage }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState({});
+  const [payment, setPayment] = useState(null);
   const [form, setForm] = useState({
     fullName: user?.fullName || '',
     dateOfBirth: '',
@@ -448,6 +495,10 @@ function Apply({ setPage }) {
     destination: '',
     intendedUse: ''
   });
+
+  useEffect(() => {
+    api.getPaymentSettings().then(setPayment).catch(() => {});
+  }, []);
 
   function update(field) {
     return (e) => setForm({ ...form, [field]: e.target.value });
@@ -587,9 +638,20 @@ function Apply({ setPage }) {
                 </div>
               </div>
               <div className="fee">
-                <div><b>Application Fee</b><span>Payment collection is coming soon</span></div>
-                <strong>—</strong>
+                <div><b>Application Fee</b><span>{payment?.bankName ? `Pay by transfer to ${payment.bankName}` : 'Payment details will be shared after submission'}</span></div>
+                <strong>{payment ? `${payment.feeCurrency} ${Number(payment.feeAmount).toLocaleString()}` : '—'}</strong>
               </div>
+              {payment?.accountNumber && (
+                <div className="review-box">
+                  <div className="top"><h3>Payment Details</h3></div>
+                  <div className="review-grid">
+                    <div><span>Account Name</span><b>{payment.accountName || '—'}</b></div>
+                    <div><span>Account Number</span><b>{payment.accountNumber}</b></div>
+                    <div><span>Bank</span><b>{payment.bankName || '—'}</b></div>
+                  </div>
+                  {payment.instructions && <p className="sub">{payment.instructions}</p>}
+                </div>
+              )}
             </div>
           )}
 
@@ -764,6 +826,56 @@ function SimplePanel({ title, text }) {
     <div className="page">
       <div className="page-head"><div><h1>{title}</h1><p>{text}</p></div></div>
       <div className="card"><EmptyState text="Nothing here yet." /></div>
+    </div>
+  );
+}
+
+function ProfilePanel() {
+  const { user } = useAuth();
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    setSuccess(false);
+    setBusy(true);
+    try {
+      await api.changePassword(form);
+      setForm({ currentPassword: '', newPassword: '' });
+      setSuccess(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Profile</h1><p>Your contact and identity details.</p></div></div>
+      <div className="card">
+        <div className="detail-grid">
+          <div><span>Full Name</span><b>{user?.fullName}</b></div>
+          <div><span>Email</span><b>{user?.email}</b></div>
+          <div><span>Phone</span><b>{user?.phone || '—'}</b></div>
+          <div><span>Role</span><b>{user?.role}</b></div>
+        </div>
+      </div>
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-head"><div><h2>Change Password</h2></div></div>
+        <ErrorBanner message={error} />
+        {success && <p className="sub">Password updated.</p>}
+        <form className="form-grid" onSubmit={submit}>
+          <Field label="Current Password" type="password" wide value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} required />
+          <Field label="New Password" type="password" wide value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} required />
+          <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+            <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1107,6 +1219,257 @@ function Verify({ setPage }) {
   );
 }
 
+function AdminTeam() {
+  const { user } = useAuth();
+  const [team, setTeam] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ fullName: '', email: '', role: 'staff' });
+  const [busy, setBusy] = useState(false);
+  const [createdCredential, setCreatedCredential] = useState(null);
+
+  function load() {
+    setLoading(true);
+    api.listTeam()
+      .then((data) => setTeam(data.users))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(load, []);
+
+  if (user?.role !== 'admin') {
+    return <div className="page"><div className="page-head"><div><h1>Team</h1></div></div><div className="card"><EmptyState text="Only admins can manage team members." /></div></div>;
+  }
+
+  async function addMember(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    setCreatedCredential(null);
+    try {
+      const { user: newUser, tempPassword } = await api.addTeamMember(form);
+      setCreatedCredential({ email: newUser.email, tempPassword });
+      setForm({ fullName: '', email: '', role: 'staff' });
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleActive(member) {
+    setError('');
+    try {
+      await api.updateTeamMember(member.id, { isActive: !member.isActive });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function changeRole(member, role) {
+    setError('');
+    try {
+      await api.updateTeamMember(member.id, { role });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Team</h1><p>Staff and admin accounts that can log into the admin dashboard.</p></div></div>
+      <ErrorBanner message={error} />
+      <div className="card">
+        <div className="card-head"><div><h2>Add a team member</h2><p>A one-time temporary password is generated — share it securely; they should change it after logging in.</p></div></div>
+        <form className="form-grid" onSubmit={addMember}>
+          <Field label="Full Name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required />
+          <Field label="Email Address" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+          <Field label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} options={['staff', 'admin']} />
+          <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+            <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add team member'}</button>
+          </div>
+        </form>
+        {createdCredential && (
+          <div className="form-error" style={{ background: '#eef7ff', borderColor: '#bcdcff', color: 'var(--ink)' }}>
+            <span>Account created for <b>{createdCredential.email}</b>. Temporary password: <b>{createdCredential.tempPassword}</b> (shown once — share it securely).</span>
+          </div>
+        )}
+      </div>
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-head"><div><h2>Team members</h2></div></div>
+        {loading ? (
+          <EmptyState text="Loading team…" />
+        ) : team.length === 0 ? (
+          <EmptyState text="No team members yet." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {team.map((m) => (
+                  <tr key={m.id}>
+                    <td><b>{m.fullName}</b></td>
+                    <td>{m.email}</td>
+                    <td>
+                      <select value={m.role} onChange={(e) => changeRole(m, e.target.value)}>
+                        <option value="staff">Staff</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    <td>{m.mfaEnabled ? 'Enabled' : 'Off'}</td>
+                    <td>{m.isActive ? 'Active' : 'Disabled'}</td>
+                    <td><button className="btn ghost sm" onClick={() => toggleActive(m)}>{m.isActive ? 'Disable' : 'Enable'}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminSettings() {
+  const { user } = useAuth();
+  const [tab, setTab] = useState('Security');
+  const [error, setError] = useState('');
+  const [setupData, setSetupData] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [payment, setPayment] = useState(null);
+  const [paymentForm, setPaymentForm] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.getPaymentSettings().then((data) => { setPayment(data); setPaymentForm(data); }).catch((err) => setError(err.message));
+  }, []);
+
+  if (user?.role !== 'admin') {
+    return <div className="page"><div className="page-head"><div><h1>Settings</h1></div></div><div className="card"><EmptyState text="Only admins can manage portal settings." /></div></div>;
+  }
+
+  async function startMfaSetup() {
+    setError('');
+    setBusy(true);
+    try {
+      const data = await api.mfaSetup();
+      setSetupData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmEnable(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api.mfaEnable(mfaCode);
+      setSetupData(null);
+      setMfaCode('');
+      window.location.reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disableMfa(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api.mfaDisable(mfaCode);
+      setMfaCode('');
+      window.location.reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePayment(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    setSaved(false);
+    try {
+      const data = await api.updatePaymentSettings(paymentForm);
+      setPayment(data);
+      setSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <div className="page-head"><div><h1>Settings</h1><p>Admin security and payment configuration.</p></div></div>
+      <ErrorBanner message={error} />
+      <div className="card">
+        <div className="tabs">
+          {['Security', 'Payment'].map((t) => (
+            <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>
+          ))}
+        </div>
+
+        {tab === 'Security' && (
+          <div>
+            <p className="sub">Two-factor authentication (Google Authenticator compatible) for your own admin account.</p>
+            {user.mfaEnabled ? (
+              <form onSubmit={disableMfa} className="form-grid">
+                <Field label="Enter a current code to disable 2FA" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
+                <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+                  <button className="btn ghost" type="submit" disabled={busy}>{busy ? 'Disabling…' : 'Disable 2FA'}</button>
+                </div>
+              </form>
+            ) : setupData ? (
+              <form onSubmit={confirmEnable} className="form-grid">
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <img src={setupData.qrCode} alt="2FA QR code" style={{ width: 200, height: 200 }} />
+                  <p className="sub">Scan with Google Authenticator (or any TOTP app), or enter this key manually: <b>{setupData.secret}</b></p>
+                </div>
+                <Field label="Enter the 6-digit code to confirm" wide value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" required />
+                <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+                  <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Confirming…' : 'Enable 2FA'}</button>
+                </div>
+              </form>
+            ) : (
+              <button className="btn primary" onClick={startMfaSetup} disabled={busy}>{busy ? 'Starting…' : 'Set up 2FA'}</button>
+            )}
+          </div>
+        )}
+
+        {tab === 'Payment' && paymentForm && (
+          <form className="form-grid" onSubmit={savePayment}>
+            <Field label="Application Fee Amount" value={paymentForm.feeAmount} onChange={(e) => setPaymentForm({ ...paymentForm, feeAmount: e.target.value })} required />
+            <Field label="Currency" value={paymentForm.feeCurrency} onChange={(e) => setPaymentForm({ ...paymentForm, feeCurrency: e.target.value })} options={['NGN', 'USD', 'GBP', 'EUR']} />
+            <Field label="Bank Name" value={paymentForm.bankName} onChange={(e) => setPaymentForm({ ...paymentForm, bankName: e.target.value })} wide />
+            <Field label="Account Name" value={paymentForm.accountName} onChange={(e) => setPaymentForm({ ...paymentForm, accountName: e.target.value })} wide />
+            <Field label="Account Number" value={paymentForm.accountNumber} onChange={(e) => setPaymentForm({ ...paymentForm, accountNumber: e.target.value })} wide />
+            <Field label="Payment Instructions" value={paymentForm.instructions} onChange={(e) => setPaymentForm({ ...paymentForm, instructions: e.target.value })} wide textarea />
+            <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+              <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save payment settings'}</button>
+              {saved && <span className="sub">Saved.</span>}
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppInner() {
   const { user, initializing } = useAuth();
   const [page, setPage] = useState('home');
@@ -1141,14 +1504,14 @@ function AppInner() {
         {base === 'applications' && <Applications setPage={setPage} />}
         {base === 'payments' && <SimplePanel title="Payments" text="Application fees and receipts." />}
         {base === 'documents' && <SimplePanel title="Documents" text="Files attached to your applications." />}
-        {base === 'profile' && <SimplePanel title="Profile" text="Your contact and identity details." />}
+        {base === 'profile' && <ProfilePanel />}
         {base === 'support' && <SimplePanel title="Support" text="Get help with an application." />}
       </CustomerLayout>
     );
   }
 
   if (base === 'admin-review' || adminPageIds.includes(base)) {
-    if (!user || user.role !== 'admin') return <><PublicHeader page={page} setPage={setPage} /><Login setPage={setPage} /></>;
+    if (!user || (user.role !== 'admin' && user.role !== 'staff')) return <><PublicHeader page={page} setPage={setPage} /><Login setPage={setPage} /></>;
     return (
       <AdminLayout active={base === 'admin-review' ? 'admin-apps' : base} setPage={setPage}>
         {base === 'admin' && <AdminHome setPage={setPage} />}
@@ -1157,8 +1520,8 @@ function AppInner() {
         {base === 'admin-customers' && <SimplePanel title="Customers" text="Registered portal users." />}
         {base === 'admin-payments' && <SimplePanel title="Payments" text="Fee collection overview." />}
         {base === 'admin-docs' && <SimplePanel title="Documents" text="Files submitted for review." />}
-        {base === 'admin-staff' && <SimplePanel title="Staff" text="Internal user access." />}
-        {base === 'admin-settings' && <SimplePanel title="Settings" text="Portal configuration." />}
+        {base === 'admin-staff' && <AdminTeam />}
+        {base === 'admin-settings' && <AdminSettings />}
       </AdminLayout>
     );
   }

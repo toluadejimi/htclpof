@@ -6,6 +6,9 @@ import authRoutes from './routes/auth.js';
 import applicationRoutes from './routes/applications.js';
 import documentRoutes from './routes/documents.js';
 import verifyRoutes from './routes/verify.js';
+import mfaRoutes from './routes/mfa.js';
+import adminUserRoutes from './routes/admin-users.js';
+import settingsRoutes from './routes/settings.js';
 
 const app = express();
 
@@ -16,9 +19,12 @@ app.use(cookieParser());
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/mfa', mfaRoutes);
 app.use('/api/applications', applicationRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/verify', verifyRoutes);
+app.use('/api/admin/team', adminUserRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Centralized error handler — avoids leaking internals to clients.
 app.use((err, req, res, next) => {
