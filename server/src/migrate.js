@@ -2,11 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
-import mysql from 'mysql2/promise';
+import { pool } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const pool = mysql.createPool(process.env.DATABASE_URL);
 
 function splitStatements(sql) {
   return sql
