@@ -1051,17 +1051,22 @@ function DocumentsPanel() {
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>File</th><th>Type</th><th>Application</th><th>Uploaded</th><th /></tr></thead>
+              <thead><tr><th /><th>File</th><th>Type</th><th>Application</th><th>Uploaded</th><th /></tr></thead>
               <tbody>
-                {documents.map((d) => (
-                  <tr key={d.id}>
-                    <td><b>{d.original_name}</b></td>
-                    <td>{d.doc_type}</td>
-                    <td>{d.application_reference}</td>
-                    <td>{new Date(d.uploaded_at).toLocaleDateString()}</td>
-                    <td><a className="btn ghost sm" href={`${API_BASE}/api/documents/${d.id}/file`} target="_blank" rel="noreferrer">Download</a></td>
-                  </tr>
-                ))}
+                {documents.map((d) => {
+                  const fileUrl = `${API_BASE}/api/documents/${d.id}/file`;
+                  const isImage = d.mime_type?.startsWith('image/');
+                  return (
+                    <tr key={d.id}>
+                      <td>{isImage ? <img src={fileUrl} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} /> : <FileText size={20} />}</td>
+                      <td><b>{d.original_name}</b></td>
+                      <td>{d.doc_type}</td>
+                      <td>{d.application_reference}</td>
+                      <td>{new Date(d.uploaded_at).toLocaleDateString()}</td>
+                      <td><a className="btn ghost sm" href={fileUrl} target="_blank" rel="noreferrer">Download</a></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1355,7 +1360,25 @@ function AdminReview({ applicationId, setPage }) {
         {tab === 'Documents' && (
           documents.length === 0
             ? <EmptyState text="No documents uploaded yet." />
-            : <ul>{documents.map((d) => <li key={d.id}>{d.doc_type}: {d.original_name}</li>)}</ul>
+            : (
+              <div className="doc-grid">
+                {documents.map((d) => {
+                  const fileUrl = `${API_BASE}/api/documents/${d.id}/file`;
+                  const isImage = d.mime_type?.startsWith('image/');
+                  return (
+                    <a key={d.id} className="doc-thumb" href={fileUrl} target="_blank" rel="noreferrer">
+                      {isImage ? (
+                        <img src={fileUrl} alt={d.original_name} />
+                      ) : (
+                        <div className="doc-thumb-file"><FileText size={28} /></div>
+                      )}
+                      <span>{d.doc_type}</span>
+                      <small>{d.original_name}</small>
+                    </a>
+                  );
+                })}
+              </div>
+            )
         )}
         {tab === 'Audit Log' && (
           events.length === 0
